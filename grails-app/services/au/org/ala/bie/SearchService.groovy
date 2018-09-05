@@ -820,10 +820,12 @@ class SearchService {
 
         // Conservation status map
         def clists = conservationListsSource.lists ?: []
-        def conservationStatus = clists.inject([:], { ac, cl ->
+        def clists_fieldVal = clists.findAll{ it.sourceField != '*' } /* exclude simple list-membership entries */
+
+        def conservationStatus = clists_fieldVal.inject([:], { ac, cl ->
             final cs = taxon[cl.field]
             if (cs)
-                ac.put(cl.label, [ dr: cl.uid, status: cs ])
+                ac.put(cl.label, [dr: cl.uid, status: cs])
             ac
         })
 
@@ -957,7 +959,7 @@ class SearchService {
             model.taxonConcept["acceptedConceptID"] = taxon.acceptedConceptID
         if (taxon.acceptedConceptName)
             model.taxonConcept["acceptedConceptName"] = taxon.acceptedConceptName
-        
+
         if(getAdditionalResultFields()) {
             def doc = [:]
             getAdditionalResultFields().each { field ->
@@ -968,7 +970,7 @@ class SearchService {
 
             model << doc
         }
-        
+
         model
     }
 
@@ -1155,23 +1157,23 @@ class SearchService {
                 ]
             } else {
                 doc = [
-                        id : it.id,
-                        guid : it.guid,
-                        linkIdentifier : it.linkIdentifier,
-                        idxtype: it.idxtype,
-                        name : it.name,
-                        description : it.description
+                        id            : it.id,
+                        guid          : it.guid,
+                        linkIdentifier: it.linkIdentifier,
+                        idxtype       : it.idxtype,
+                        name          : it.name,
+                        description   : it.description
                 ]
                 if (it.taxonGuid) {
                     doc.put("taxonGuid", it.taxonGuid)
                 }
-                if(it.centroid){
+                if (it.centroid) {
                     doc.put("centroid", it.centroid)
                 }
 
-                if(getAdditionalResultFields()){
+                if (getAdditionalResultFields()) {
                     getAdditionalResultFields().each { field ->
-                        if(it."${field}") {
+                        if (it."${field}") {
                             doc.put(field, it."${field}")
                         }
                     }

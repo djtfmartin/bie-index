@@ -559,6 +559,51 @@ class ImportService {
     }
 
     /**
+     * Removes field values from all records in index
+     * @param fld
+     * @throws Exception
+     */
+    def clearFieldValues(String fld) throws Exception {
+        int page = 1
+        int pageSize = 1000
+        def js = new JsonSlurper()
+        def baseUrl = grailsApplication.config.indexOfflineBaseUrl
+
+        try {
+            while (true) {
+                def solrServerUrl = baseUrl + "/select?wt=json&q=*:*&fq=" + fld + ":[*+TO+*]&start=0&rows=" + pageSize //note, always start at 0 since getting rid of all values
+                log.info("SOLR clear field URL: " + solrServerUrl)
+                def queryResponse = Encoder.encodeUrl(solrServerUrl).toURL().getText("UTF-8")
+                def json = js.parseText(queryResponse)
+                int total = json.response.numFound
+                def docs = json.response.docs
+                def buffer = []
+
+                if (docs.isEmpty())
+                    break
+                docs.each { doc ->
+                    def update = [:]
+                    Map<String, String> partialUpdateNull = new HashMap<String, String>();
+                    partialUpdateNull.put("set", null);
+                    update["id"] = doc.id // doc key
+                    update["idxtype"] = ["set": doc.idxtype] // required field
+                    update["guid"] = ["set": doc.guid] // required field
+                    update[fld] = partialUpdateNull
+                    buffer << update
+                }
+                if (!buffer.isEmpty()) {
+                    log.info("Committing cleared fields to SOLR: #" + page.toString() + " set of " + pageSize.toString() + " records")
+                    indexService.indexBatch(buffer)
+                }
+                page++
+            }
+        } catch (Exception ex) {
+            log.error("Unable to clear field " + fld + " values ", ex)
+            log("Error: " + ex.getMessage())
+        }
+    }
+
+    /**
      * Import and index species lists for:
      * <ul>
      *   <li> conservation status </li>
@@ -571,8 +616,19 @@ class ImportService {
         def speciesListUrl = grailsApplication.config.speciesList.url
         def speciesListParams = grailsApplication.config.speciesList.params
         def defaultSourceField = conservationListsSource.defaultSourceField
-        def lists =conservationListsSource.lists
+        def lists = conservationListsSource.lists
         Integer listNum = 0
+        def speciesListInfoUrl = grailsApplication.config?.speciesListInfo?.url ?: ''
+        String speciesListName = ''
+        def deleteFirst = conservationListsSource.deleteFirst
+
+        if (deleteFirst) {
+            String[] delFirstFields = deleteFirst.split(',')
+            delFirstFields.each { fld ->
+                log("Deleting field contents for: " + fld)
+                clearFieldValues(fld)
+            }
+        }
 
         lists.each { resource ->
             listNum++
@@ -580,12 +636,19 @@ class ImportService {
             String uid = resource.uid
             String solrField = resource.field ?: "conservationStatus_s"
             String sourceField = resource.sourceField ?: defaultSourceField
+            String action = resource.action ?: "set"
             if (uid && solrField) {
                 def url = "${speciesListUrl}${uid}${speciesListParams}"
                 log("Loading list from: " + url)
+                def urlInfo = "${speciesListInfoUrl}${uid}"
                 try {
                     JSONElement json = JSON.parse(getStringForUrl(url))
-                    updateDocsWithConservationStatus(json, sourceField, solrField, uid)
+                    if (speciesListInfoUrl) {
+                        log.info("species list info: " + urlInfo)
+                        JSONElement jsonInfo = JSON.parse(getStringForUrl(urlInfo))
+                        speciesListName = jsonInfo.listName
+                    }
+                    updateDocsWithConservationStatus(json, sourceField, solrField, uid, action, speciesListName)
                 } catch (Exception ex) {
                     def msg = "Error calling webservice: ${ex.message}"
                     log(msg)
@@ -850,7 +913,7 @@ class ImportService {
      * @param SolrFieldName
      * @return
      */
-    private updateDocsWithConservationStatus(JSONElement json, String jsonFieldName, String SolrFieldName, String drUid) {
+    private updateDocsWithConservationStatus(JSONElement json, String jsonFieldName, String SolrFieldName, String drUid, String action, String speciesListName) {
         if (json.size() > 0) {
             def totalDocs = json.size()
             def buffer = []
@@ -878,8 +941,27 @@ class ImportService {
                     doc["id"] = taxonDoc.id // doc key
                     doc["idxtype"] = ["set": taxonDoc.idxtype] // required field
                     doc["guid"] = ["set": taxonDoc.guid] // required field
-                    def fieldVale = item.kvpValues.find { it.key == jsonFieldName }?.get("value")
-                    doc[SolrFieldName] = ["set": fieldVale] // "set" lets SOLR know to update record
+                    def fieldVale
+                    if (jsonFieldName == "*") { //note membership of list itself, rather than specific list field value
+                        if (speciesListName) {
+                            fieldVale = speciesListName
+                        } else {
+                            fieldVale = drUid
+                        }
+                    } else {
+                        fieldVale = item.kvpValues.find { it.key == jsonFieldName }?.get("value")
+                    }
+                    if (action == "set") {
+                        doc[SolrFieldName] = ["set": fieldVale]
+                    } else if (action == "add") {
+                        ArrayList<String> existingVals = taxonDoc[SolrFieldName]
+                        if (!existingVals) {
+                            doc[SolrFieldName] = ["set": fieldVale]
+                        } else {
+                            if (!existingVals.contains(fieldVale)) existingVals << fieldVale
+                            doc[SolrFieldName] = ["set": existingVals]
+                        }
+                    }
                     log.debug "adding to doc = ${doc}"
                     buffer << doc
                 } else {

@@ -71,7 +71,6 @@ dependencies {
     }
     compile "org.jsoup:jsoup:1.8.3"
     compile 'org.grails.plugins:external-config:1.1.1'
-
     compile group: 'org.grails.plugins', name: 'ala-bootstrap3', version: '3.0.3'
     compile(group: 'org.grails.plugins', name: 'ala-auth', version:'3.1.0') {
         exclude group: 'javax.servlet', module: 'servlet-api'
