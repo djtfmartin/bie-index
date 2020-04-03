@@ -901,8 +901,8 @@ class ImportService implements GrailsConfigurationAware {
         (0..totalPages).each { index ->
             try {
                 int start = index * batchSize
-                int end = (start + batchSize < guids.size()) ? start + batchSize - 1 : guids.size()
-                log.debug "paging biocache search - ${start} to ${end}"
+                int end = (start + batchSize < guids.size()) ? start + batchSize : guids.size()
+                log.debug "paging biocache search - ${start} to ${end-1}"
                 def guidSubset = guids.subList(start, end)
                 def counts = biocacheService.counts(guidSubset, occurrenceCountFilter)
                 counts?.each { guid, count ->
